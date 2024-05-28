@@ -25,6 +25,10 @@ struct tls_version tls_1_2 = {.major = 3,.minor = 3 };
 void num_to_bytes(uint64_t in, uint8_t *out, int count)
 {
     // TODO: convert in into a list of network-order count bytes and write the result in out
+    for (int i = 0; i<count; ++i) {
+        uint8_t val = (in >> i*8) & 0xFF;
+        out[i] = val;
+    }
 }
 
 
@@ -171,10 +175,17 @@ int tls_context_derive_keys(struct tls_context *ctx,
 
     // TODO serialize the RSA premaster secret
     // TODO compute the ctx->master_secret by using the PRF function as described in the notes
-    
+    uint8_t* i_have_no_idea = malloc(48);
+    memcpy(i_have_no_idea, &premaster->version.major, 1);
+    memcpy(i_have_no_idea +1, &premaster->version.minor, 1);
+    memcpy(i_have_no_idea+2, premaster->random, 46);
+    tls_prf(i_have_no_idea, 48, ctx->client_random, 32, ctx->master_secret, 48);
+
+
     uint8_t key_block[96];
 
     // TODO compute the key_block using the PRF function as described in the notes
+    tls_prf(ctx->master_secret, 48, ctx->client_random, 32, key_block, 96);
 
     memcpy(ctx->client_mac_key, key_block, 32);
     memcpy(ctx->server_mac_key, key_block + 32, 32);
@@ -199,6 +210,8 @@ size_t tls_context_encrypt(struct tls_context *ctx,
 	record->length + SHA256_DIGEST_LENGTH + block_size + padding_len;
     uint8_t iv[block_size];
 
+    RAND_bytes(iv, sizeof(iv));
+    memcpy(out, &iv, sizeof(iv));
 
     if (!out)
 	return cipher_len;
@@ -220,10 +233,26 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     // to a bug that is quite nasty to debug
     EVP_CIPHER_CTX_set_padding(enc_ctx, 0);
 
-    // TODO encrypt the plaintext 
+    // TODO encrypt the plaintext
+    unsigned char plaintext[] = "Some plaintext to encrypt";
+    unsigned char ciphertext[cipher_len];
+    if(EVP_EncryptUpdate(enc_ctx, ciphertext, 0, plaintext, sizeof(plaintext)-1) != 1){
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
 
     // TODO compute the HMAC code as described into the nodes and encrypt it by using
     // a second call to the EVP_EncryptUpdate function
+    unsigned char hmac[SHA256_DIGEST_LENGTH];
+    if(!HMAC(EVP_sha256(), ctx->client_mac_key, 32, plaintext, sizeof(plaintext)-1, hmac, NULL)){
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
+
+    if(EVP_EncryptUpdate(enc_ctx, hmac, (int *)SHA224_DIGEST_LENGTH, ciphertext, cipher_len) != 1){
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
 
     // TODO compute the value used for padding and call the EVP_EncryptUpdate function
 
@@ -284,6 +313,12 @@ void client_hello_init(struct client_hello *hello)
     // cipher suite and no compression.
     //
     // The client does not have to restore a previous session.
+    hello->version = tls_1_2;
+    hello->random.gmt_unix_time = time(NULL);
+    RAND_bytes(hello->random.random_bytes, 28);
+    // hello->cipher_suite = { 0x00,0x3C };
+    hello->cipher_suite = (0x00 >> 8) & 0x3C;
+    hello->compression_method = 0x00;
 
     hello->sig_algo = 0x0401;
 }
@@ -302,6 +337,13 @@ size_t client_hello_marshall(const struct client_hello *hello,
     // The required TLS extensions are already done for you
     //
     // The client does not have to restore a previous session.
+
+    num_to_bytes(hello->version.major, out, 1);
+    num_to_bytes(hello->version.minor, out+1, 1);
+    num_to_bytes(hello->random.gmt_unix_time, out+2, 4);
+    memcpy(out+6, hello->random.random_bytes, 28);
+    num_to_bytes(hello->cipher_suite, out+34, 2);
+    num_to_bytes(hello->compression_method, out+36, 1);
 
     num_to_bytes(8, out + 45, 2);
     num_to_bytes(0xd, out + 47, 2);
@@ -352,7 +394,13 @@ int server_hello_recv(struct tls_context *ctx, struct server_hello *out)
     }
 
 
-    // TODO use the contents of record.fragment to populate the filds of out
+    // TODO use the contents of record.fragment to populate the fields of out
+    memcpy(&out->version.major, record.fragment, 1);
+    memcpy(&out->version.minor, record.fragment +1, 1);
+    memcpy(&out->session_id_len, record.fragment+2, 1);
+    memcpy(&out->session_id, record.fragment+3, 32);
+    memcpy(&out->cipher_suite, record.fragment+35, 2);
+    memcpy(&out->compression_method, record.fragment+37, 1);
 
 
     int ret =
@@ -379,6 +427,8 @@ X509 *server_cert_recv(const struct tls_context *ctx)
     // TODO read the certificate chain and return the first certificate (you may assume that there is only one certificate)
     // Hint: use the d2i_X509 OpenSSL function to deserialize the DER-encoded structure
     X509 *cert = NULL;
+    long cert_length = ((*record.fragment + 3) >> 16) & ((*record.fragment+4)>>8) & ((*record.fragment +5));
+    d2i_X509(&cert, (record.fragment +3), cert_length);
 
     tls_record_free(&record);
     return cert;
@@ -416,6 +466,10 @@ int server_hello_done_recv(const struct tls_context *ctx)
 void rsa_premaster_secret_init(struct rsa_premaster_secret *exchange)
 {
     // TODO Generate a RSA premaster secret
+    exchange->version.major = tls_1_2.major;
+    exchange->version.major = tls_1_2.minor;
+    RAND_bytes(exchange->random, 46);
+
 }
 
 
