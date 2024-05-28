@@ -289,6 +289,18 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     // TODO decrypt the fragment in record->fragment
     // TODO finalize the decryption process
 
+    if(EVP_DecryptUpdate(dec_ctx, out, record->length, record->fragment, record->length) != 1){
+        EVP_CIPHER_CTX_free(dec_ctx);
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
+
+    if(EVP_DecryptFinal(dec_ctx, out, 0) != 1){
+        EVP_CIPHER_CTX_free(dec_ctx);
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
+
     EVP_CIPHER_CTX_free(dec_ctx);
 
     // TODO compute the length of padding by looking
@@ -301,6 +313,7 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     // the expected sequence number you can find in ctx->server_seq
 
     // TODO copy ONLY the plaintext into out, i.e. remove padding and HMAC
+    memcpy(out, ???, 0);
 
     return plain_len;
 }
