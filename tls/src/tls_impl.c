@@ -175,17 +175,23 @@ int tls_context_derive_keys(struct tls_context *ctx,
 
     // TODO serialize the RSA premaster secret
     // TODO compute the ctx->master_secret by using the PRF function as described in the notes
-    uint8_t* i_have_no_idea = malloc(48);
-    memcpy(i_have_no_idea, &premaster->version.major, 1);
-    memcpy(i_have_no_idea +1, &premaster->version.minor, 1);
-    memcpy(i_have_no_idea+2, premaster->random, 46);
-    tls_prf(i_have_no_idea, 48, ctx->client_random, 32, ctx->master_secret, 48);
+    // uint8_t* i_have_no_idea = malloc(48);
+    // memcpy(i_have_no_idea, &premaster->version.major, 1);
+    // memcpy(i_have_no_idea +1, &premaster->version.minor, 1);
+    // memcpy(i_have_no_idea+2, premaster->random, 46);
+    // tls_prf(i_have_no_idea, 48, ctx->client_random, 32, ctx->master_secret, 48);
+    uint8_t serialized_premaster[48];
+    serialized_premaster[0] = premaster->version.major;
+    serialized_premaster[1] = premaster->version.minor;
+    memcpy(serialized_premaster + 2, premaster->random, 46);
+
+    tls_prf(serialized_premaster, sizeof(serialized_premaster), ctx->client_random, sizeof(ctx->client_random), ctx->master_secret, sizeof(ctx->master_secret));
 
 
     uint8_t key_block[96];
 
     // TODO compute the key_block using the PRF function as described in the notes
-    tls_prf(ctx->master_secret, 48, ctx->client_random, 32, key_block, 96);
+    tls_prf(ctx->master_secret, sizeof(ctx->master_secret), ctx->client_random, 32, key_block, 96);
 
     memcpy(ctx->client_mac_key, key_block, 32);
     memcpy(ctx->server_mac_key, key_block + 32, 32);
@@ -211,7 +217,6 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     uint8_t iv[block_size];
 
     RAND_bytes(iv, sizeof(iv));
-    memcpy(out, &iv, sizeof(iv));
 
     if (!out)
 	return cipher_len;
@@ -234,7 +239,8 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     EVP_CIPHER_CTX_set_padding(enc_ctx, 0);
 
     // TODO encrypt the plaintext
-    if(EVP_EncryptUpdate(enc_ctx, out, &record->length, record->fragment, record->length) != 1){
+    int out_len;
+    if(EVP_EncryptUpdate(enc_ctx, out +block_size, &out_len, record->fragment, record->length) != 1){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
@@ -242,7 +248,7 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     // TODO compute the HMAC code as described into the nodes and encrypt it by using
     // a second call to the EVP_EncryptUpdate function
     unsigned char hmac[SHA256_DIGEST_LENGTH];
-    if(!HMAC(EVP_sha256(), ctx->client_mac_key, 32, record->fragment, sizeof(record->fragment), hmac, NULL)){
+    if(!HMAC(EVP_sha256(), ctx->client_mac_key, 32, out+block_size, record->length, hmac, NULL)){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
@@ -254,7 +260,11 @@ size_t tls_context_encrypt(struct tls_context *ctx,
 
     // TODO compute the value used for padding and call the EVP_EncryptUpdate function
     uint8_t padding_value = record->length % 16;
-    if(EVP_EncryptUpdate(enc_ctx, out, 0, record->fragment, 0) != 1){
+    uint8_t padding[padding_value];
+    for(int i = 0; i< padding_value; i++){
+        padding[i] = padding_value;
+    }
+    if(EVP_EncryptUpdate(enc_ctx, out, 0, padding, padding_value) != 1){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
@@ -269,7 +279,7 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     EVP_CIPHER_CTX_free(enc_ctx);
 
     // TODO return the length of the ciphertext including the IV (it should be a multiple of 16)
-    return 100;
+    return out_len;
 }
 
 
@@ -313,7 +323,7 @@ size_t tls_context_decrypt(struct tls_context *ctx,
 
     // TODO compute the length of padding by looking
     // at the last byte of the decrypted text and remove the padding
-    uint8_t last_byte = out[record->length];
+    uint8_t last_byte = out[record->length-1];
     plain_len = plain_len -last_byte;
 
 
@@ -322,9 +332,14 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     // record, the length of original message (the number of decrypted bytes
     // minus the length of the HMAC code and the length of the padding), and
     // the expected sequence number you can find in ctx->server_seq
+    uint8_t hmac[32];
+    if(!HMAC(EVP_sha256(), ctx->server_mac_key, 32, record->fragment, plain_len, hmac , NULL)){
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
 
     // TODO copy ONLY the plaintext into out, i.e. remove padding and HMAC
-    // memcpy(out, ???, 0);
+    memcpy(out, record->fragment, plain_len);
 
     return plain_len;
 }
