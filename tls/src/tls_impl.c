@@ -234,9 +234,7 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     EVP_CIPHER_CTX_set_padding(enc_ctx, 0);
 
     // TODO encrypt the plaintext
-    unsigned char plaintext[] = "Some plaintext to encrypt";
-    unsigned char ciphertext[cipher_len];
-    if(EVP_EncryptUpdate(enc_ctx, ciphertext, 0, plaintext, sizeof(plaintext)-1) != 1){
+    if(EVP_EncryptUpdate(enc_ctx, out, &record->length, record->fragment, record->length) != 1){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
@@ -244,19 +242,29 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     // TODO compute the HMAC code as described into the nodes and encrypt it by using
     // a second call to the EVP_EncryptUpdate function
     unsigned char hmac[SHA256_DIGEST_LENGTH];
-    if(!HMAC(EVP_sha256(), ctx->client_mac_key, 32, plaintext, sizeof(plaintext)-1, hmac, NULL)){
+    if(!HMAC(EVP_sha256(), ctx->client_mac_key, 32, record->fragment, sizeof(record->fragment), hmac, NULL)){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
 
-    if(EVP_EncryptUpdate(enc_ctx, hmac, (int *)SHA224_DIGEST_LENGTH, ciphertext, cipher_len) != 1){
+    if(EVP_EncryptUpdate(enc_ctx, hmac, (int *)SHA224_DIGEST_LENGTH, out, cipher_len) != 1){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
 
     // TODO compute the value used for padding and call the EVP_EncryptUpdate function
+    uint8_t padding_value = record->length % 16;
+    if(EVP_EncryptUpdate(enc_ctx, out, 0, record->fragment, 0) != 1){
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
 
     // TODO remember to finalize the encryption process
+    if(EVP_EncryptFinal(enc_ctx, out, 0) != 0){
+        EVP_CIPHER_CTX_free(enc_ctx);
+        ERR_print_errors_fp(stderr);
+        return EXIT_FAILURE;
+    }
 
     EVP_CIPHER_CTX_free(enc_ctx);
 
@@ -289,7 +297,7 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     // TODO decrypt the fragment in record->fragment
     // TODO finalize the decryption process
 
-    if(EVP_DecryptUpdate(dec_ctx, out, record->length, record->fragment, record->length) != 1){
+    if(EVP_DecryptUpdate(dec_ctx, out, &record->length, record->fragment, record->length) != 1){
         EVP_CIPHER_CTX_free(dec_ctx);
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
@@ -305,6 +313,9 @@ size_t tls_context_decrypt(struct tls_context *ctx,
 
     // TODO compute the length of padding by looking
     // at the last byte of the decrypted text and remove the padding
+    uint8_t last_byte = out[record->length];
+    plain_len = plain_len -last_byte;
+
 
 
     // TODO compute the expected HMAC code using the version in the
@@ -313,7 +324,7 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     // the expected sequence number you can find in ctx->server_seq
 
     // TODO copy ONLY the plaintext into out, i.e. remove padding and HMAC
-    memcpy(out, ???, 0);
+    // memcpy(out, ???, 0);
 
     return plain_len;
 }
@@ -441,7 +452,8 @@ X509 *server_cert_recv(const struct tls_context *ctx)
     // Hint: use the d2i_X509 OpenSSL function to deserialize the DER-encoded structure
     X509 *cert = NULL;
     long cert_length = ((*record.fragment + 3) >> 16) & ((*record.fragment+4)>>8) & ((*record.fragment +5));
-    d2i_X509(&cert, (record.fragment +3), cert_length);
+    uint8_t * first_cert = record.fragment +3;
+    d2i_X509(&cert, &first_cert, cert_length);
 
     tls_record_free(&record);
     return cert;
