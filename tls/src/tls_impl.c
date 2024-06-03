@@ -217,7 +217,7 @@ size_t tls_context_encrypt(struct tls_context *ctx,
 
     // TODO randomly generate 16 bytes of IV and write them in out in clear
     int block_size = EVP_CIPHER_get_block_size(EVP_aes_128_cbc());
-    uint8_t padding_len = 10;
+    uint8_t padding_len = block_size - (record->length)%block_size;
     size_t cipher_len =
 	record->length + SHA256_DIGEST_LENGTH + block_size + padding_len;
     uint8_t iv[block_size];
@@ -227,6 +227,7 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     if (!out)
 	return cipher_len;
 
+    memcpy(out, iv, sizeof(iv));
 
     EVP_CIPHER_CTX *enc_ctx = EVP_CIPHER_CTX_new();
     if (!enc_ctx)
@@ -245,47 +246,71 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     EVP_CIPHER_CTX_set_padding(enc_ctx, 0);
 
     // TODO encrypt the plaintext
+    // uint8_t data[1];
+
+
     int out_len;
-    if(EVP_EncryptUpdate(enc_ctx, out +block_size, &out_len, record->fragment, record->length) != 1){
+    if(EVP_EncryptUpdate(enc_ctx, out+sizeof(iv), &out_len, record->fragment, record->length) != 1){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
+    // printf("cipth len is: %ld\n", cipher_len);
+    // printf("out_len is: %d\n", out_len);
+    cipher_len = out_len+sizeof(iv);
+
 
     // TODO compute the HMAC code as described into the nodes and encrypt it by using
     // a second call to the EVP_EncryptUpdate function
     unsigned char hmac[SHA256_DIGEST_LENGTH];
-    if(!HMAC(EVP_sha256(), ctx->client_mac_key, 32, out+block_size, record->length, hmac, NULL)){
+    uint8_t hmac_data[13+record->length];
+    num_to_bytes(ctx->client_seq, hmac_data, 8);
+    hmac_data[8] = record->type;
+    hmac_data[9] = record->version.major;
+    hmac_data[10] = record->version.minor;
+    num_to_bytes(record->length, hmac_data + 11, 2);
+    memcpy(hmac_data + 13, record->fragment, record->length);    
+    if(!HMAC(EVP_sha256(), ctx->client_mac_key, sizeof(ctx->client_mac_key), hmac_data, sizeof(hmac_data), hmac, NULL)){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
 
-    if(EVP_EncryptUpdate(enc_ctx, hmac, (int *)SHA224_DIGEST_LENGTH, out, cipher_len) != 1){
+    if(EVP_EncryptUpdate(enc_ctx, out+cipher_len, &out_len, hmac, sizeof(hmac)) != 1){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
+    // printf("cipth len is: %ld\n", cipher_len);
+    // printf("out_len is: %d\n", out_len);
+    cipher_len += out_len;
 
     // TODO compute the value used for padding and call the EVP_EncryptUpdate function
-    uint8_t padding_value = record->length % 16;
-    uint8_t padding[padding_value];
-    for(int i = 0; i< padding_value; i++){
-        padding[i] = padding_value;
+    uint8_t padding[padding_len];
+    for(int i = 0; i< padding_len; i++){
+        padding[i] = padding_len-1;
     }
-    if(EVP_EncryptUpdate(enc_ctx, out, 0, padding, padding_value) != 1){
+    if(EVP_EncryptUpdate(enc_ctx, out+cipher_len, &out_len, padding, sizeof(padding)) != 1){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
+    // printf("cipth len is: %ld\n", cipher_len);
+    // printf("out_len is: %d\n", out_len);
+    cipher_len += out_len;
 
     // TODO remember to finalize the encryption process
-    if(EVP_EncryptFinal(enc_ctx, out, 0) != 0){
+    if(EVP_EncryptFinal(enc_ctx, out+cipher_len, &out_len) != 1){
         EVP_CIPHER_CTX_free(enc_ctx);
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
+    // printf("cipth len is: %ld\n", cipher_len);
+    // printf("out_len is: %d\n", out_len);
+    cipher_len += out_len;
 
     EVP_CIPHER_CTX_free(enc_ctx);
 
     // TODO return the length of the ciphertext including the IV (it should be a multiple of 16)
-    return out_len;
+    // printf("cipth len is: %ld\n", cipher_len);
+    // printf("out_len is: %d\n", out_len);
+    return cipher_len;
 }
 
 
