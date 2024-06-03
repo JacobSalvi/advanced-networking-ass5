@@ -24,10 +24,12 @@ struct tls_version tls_1_2 = {.major = 3,.minor = 3 };
 
 void num_to_bytes(uint64_t in, uint8_t *out, int count)
 {
+    // printf("BEGIN\n");
     // TODO: convert in into a list of network-order count bytes and write the result in out
     for (int i = 0; i<count; ++i) {
         uint8_t val = (in >> i*8) & 0xFF;
-        out[i] = val;
+        out[count-i-1] = val;
+        // printf("check HERE: %d\n", out[i]);
     }
 }
 
@@ -185,7 +187,7 @@ int tls_context_derive_keys(struct tls_context *ctx,
     serialized_premaster[1] = premaster->version.minor;
     memcpy(serialized_premaster + 2, premaster->random, 46);
 
-    tls_prf(serialized_premaster, sizeof(serialized_premaster), ctx->client_random, sizeof(ctx->client_random), ctx->master_secret, sizeof(ctx->master_secret));
+    tls_prf(serialized_premaster, sizeof(serialized_premaster), ctx->client_random , sizeof(ctx->client_random), ctx->master_secret, sizeof(ctx->master_secret));
 
 
     uint8_t key_block[96];
@@ -307,13 +309,14 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     // TODO decrypt the fragment in record->fragment
     // TODO finalize the decryption process
 
-    if(EVP_DecryptUpdate(dec_ctx, out, &record->length, record->fragment, record->length) != 1){
+    int out_len = 0;
+    if(EVP_DecryptUpdate(dec_ctx, out, &out_len, record->fragment, record->length) != 1){
         EVP_CIPHER_CTX_free(dec_ctx);
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
 
-    if(EVP_DecryptFinal(dec_ctx, out, 0) != 1){
+    if(EVP_DecryptFinal(dec_ctx, out, &out_len) != 1){
         EVP_CIPHER_CTX_free(dec_ctx);
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
@@ -467,7 +470,7 @@ X509 *server_cert_recv(const struct tls_context *ctx)
     // Hint: use the d2i_X509 OpenSSL function to deserialize the DER-encoded structure
     X509 *cert = NULL;
     long cert_length = ((*record.fragment + 3) >> 16) & ((*record.fragment+4)>>8) & ((*record.fragment +5));
-    uint8_t * first_cert = record.fragment +3;
+    const uint8_t * first_cert = record.fragment +3;
     d2i_X509(&cert, &first_cert, cert_length);
 
     tls_record_free(&record);
