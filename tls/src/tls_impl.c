@@ -339,40 +339,65 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     // TODO finalize the decryption process
 
     int out_len = 0;
-    if(EVP_DecryptUpdate(dec_ctx, out, &out_len, record->fragment, record->length) != 1){
+    uint8_t decrypted_text[record->length];
+    if(EVP_DecryptUpdate(dec_ctx, decrypted_text, &out_len, record->fragment, record->length) != 1){
         EVP_CIPHER_CTX_free(dec_ctx);
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
+    plain_len = out_len;
 
-    if(EVP_DecryptFinal(dec_ctx, out, &out_len) != 1){
+    if(EVP_DecryptFinal(dec_ctx, decrypted_text+out_len, &out_len) != 1){
         EVP_CIPHER_CTX_free(dec_ctx);
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
+    plain_len += out_len;
 
     EVP_CIPHER_CTX_free(dec_ctx);
+    decrypted_text[plain_len] = 0;
+
 
     // TODO compute the length of padding by looking
     // at the last byte of the decrypted text and remove the padding
-    uint8_t last_byte = out[record->length-1];
-    plain_len = plain_len -last_byte;
-
-
+    uint8_t last_byte = decrypted_text[plain_len-1]+1;
+    plain_len = plain_len - last_byte;
 
     // TODO compute the expected HMAC code using the version in the
     // record, the length of original message (the number of decrypted bytes
     // minus the length of the HMAC code and the length of the padding), and
     // the expected sequence number you can find in ctx->server_seq
+    plain_len = plain_len - 32-block_size;
+
     uint8_t hmac[32];
-    if(!HMAC(EVP_sha256(), ctx->server_mac_key, 32, record->fragment, plain_len, hmac , NULL)){
+    uint8_t hmac_data[13+plain_len];
+    num_to_bytes(ctx->server_seq, hmac_data, 8);
+    hmac_data[8] = record->type;
+    hmac_data[9] = record->version.major;
+    hmac_data[10] = record->version.minor;
+    num_to_bytes(plain_len, hmac_data + 11, 2);
+    memcpy(hmac_data + 13, decrypted_text+block_size, plain_len); 
+    if(!HMAC(EVP_sha256(), ctx->server_mac_key, 32, hmac_data, sizeof(hmac_data), hmac , NULL)){
         ERR_print_errors_fp(stderr);
         return EXIT_FAILURE;
     }
 
     // TODO copy ONLY the plaintext into out, i.e. remove padding and HMAC
-    memcpy(out, record->fragment, plain_len);
+    // plain_len = plain_len - 32-block_size;
+    // if(!out){
+    //     return plain_len;
+    // }
+    uint8_t old_hmac[32];
+    memcpy(old_hmac, decrypted_text+block_size+plain_len, 32);
+    if(memcmp(hmac, old_hmac, 32)!=0){
+        return 0;
+    }
 
+    if(!out){
+        return plain_len;
+    }
+
+    memcpy(out, decrypted_text+block_size, plain_len);
     return plain_len;
 }
 
