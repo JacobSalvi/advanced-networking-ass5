@@ -177,23 +177,27 @@ int tls_context_derive_keys(struct tls_context *ctx,
 
     // TODO serialize the RSA premaster secret
     // TODO compute the ctx->master_secret by using the PRF function as described in the notes
-    // uint8_t* i_have_no_idea = malloc(48);
-    // memcpy(i_have_no_idea, &premaster->version.major, 1);
-    // memcpy(i_have_no_idea +1, &premaster->version.minor, 1);
-    // memcpy(i_have_no_idea+2, premaster->random, 46);
-    // tls_prf(i_have_no_idea, 48, ctx->client_random, 32, ctx->master_secret, 48);
     uint8_t serialized_premaster[48];
     serialized_premaster[0] = premaster->version.major;
     serialized_premaster[1] = premaster->version.minor;
     memcpy(serialized_premaster + 2, premaster->random, 46);
 
-    tls_prf(serialized_premaster, sizeof(serialized_premaster), ctx->client_random , sizeof(ctx->client_random), ctx->master_secret, sizeof(ctx->master_secret));
+    uint8_t seed_client_server[77];
+    memcpy(seed_client_server, "master secret", 13);
+    memcpy(seed_client_server+13, ctx->client_random, 32);
+    memcpy(seed_client_server+45, ctx->server_random, 32);
+
+    tls_prf(serialized_premaster, sizeof(serialized_premaster), seed_client_server , sizeof(seed_client_server), ctx->master_secret, sizeof(ctx->master_secret));
 
 
     uint8_t key_block[96];
 
     // TODO compute the key_block using the PRF function as described in the notes
-    tls_prf(ctx->master_secret, sizeof(ctx->master_secret), ctx->client_random, 32, key_block, 96);
+    uint8_t seed_server_client[77];
+    memcpy(seed_server_client, "key expansion", 13);
+    memcpy(seed_server_client+13, ctx->server_random, 32);
+    memcpy(seed_server_client+45, ctx->client_random, 32);
+    tls_prf(ctx->master_secret, sizeof(ctx->master_secret), seed_server_client, sizeof(seed_server_client), key_block, 96);
 
     memcpy(ctx->client_mac_key, key_block, 32);
     memcpy(ctx->server_mac_key, key_block + 32, 32);
