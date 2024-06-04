@@ -28,12 +28,10 @@ struct tls_version tls_1_2 = {.major = 3,.minor = 3 };
 
 void num_to_bytes(uint64_t in, uint8_t *out, int count)
 {
-    // printf("BEGIN\n");
     // TODO: convert in into a list of network-order count bytes and write the result in out
     for (int i = 0; i<count; ++i) {
         uint8_t val = (in >> i*8) & 0xFF;
         out[count-i-1] = val;
-        // printf("check HERE: %d\n", out[i]);
     }
 }
 
@@ -231,6 +229,7 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     if (!out)
 	return cipher_len;
 
+    // write the random bytes in out
     memcpy(out, iv, sizeof(iv));
 
     EVP_CIPHER_CTX *enc_ctx = EVP_CIPHER_CTX_new();
@@ -250,9 +249,6 @@ size_t tls_context_encrypt(struct tls_context *ctx,
     EVP_CIPHER_CTX_set_padding(enc_ctx, 0);
 
     // TODO encrypt the plaintext
-    // uint8_t data[1];
-
-
     int out_len;
     if(EVP_EncryptUpdate(enc_ctx, out+sizeof(iv), &out_len, record->fragment, record->length) != 1){
         ERR_print_errors_fp(stderr);
@@ -387,10 +383,6 @@ size_t tls_context_decrypt(struct tls_context *ctx,
     }
 
     // TODO copy ONLY the plaintext into out, i.e. remove padding and HMAC
-    // plain_len = plain_len - 32-block_size;
-    // if(!out){
-    //     return plain_len;
-    // }
     uint8_t old_hmac[32];
     memcpy(old_hmac, decrypted_text+block_size+plain_len, 32);
     if(memcmp(hmac, old_hmac, 32)!=0){
@@ -552,6 +544,9 @@ X509 *server_cert_recv(const struct tls_context *ctx)
     // TODO read the certificate chain and return the first certificate (you may assume that there is only one certificate)
     // Hint: use the d2i_X509 OpenSSL function to deserialize the DER-encoded structure
     X509 *cert = NULL;
+    // fragment[0] is the handshake protocol type
+    // fragment[1], fragment[2] and fragment[3] are the length of the message
+    // fragment[4], fragment[5] and fragment[6] are the length of the certificate chain
     long cert_length = (*(record.fragment + 7) << 16) | (*(record.fragment+8)<<8) | (*(record.fragment +9));
     const uint8_t * first_cert = record.fragment + 10;
     d2i_X509(&cert, &first_cert, cert_length);
