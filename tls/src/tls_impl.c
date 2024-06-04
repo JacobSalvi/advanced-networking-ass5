@@ -19,6 +19,10 @@
 #include <openssl/sha.h>
 
 
+// READ ME
+// I thank Arnaud Fauconnet, who helped me debug my code.
+
+
 struct tls_version tls_1_2 = {.major = 3,.minor = 3 };
 
 
@@ -548,13 +552,9 @@ X509 *server_cert_recv(const struct tls_context *ctx)
     // TODO read the certificate chain and return the first certificate (you may assume that there is only one certificate)
     // Hint: use the d2i_X509 OpenSSL function to deserialize the DER-encoded structure
     X509 *cert = NULL;
-    for(int i =0; i<10; i++){
-        printf("byte at %d is %x\n", i, *(record.fragment+i));
-    }
-    // long cert_length = ((*record.fragment + 3) >> 16) & ((*record.fragment+4)>>8) & ((*record.fragment +5));
+    long cert_length = (*(record.fragment + 7) << 16) | (*(record.fragment+8)<<8) | (*(record.fragment +9));
     const uint8_t * first_cert = record.fragment + 10;
-    printf("");
-    d2i_X509(&cert, &first_cert, record.length - 10);
+    d2i_X509(&cert, &first_cert, cert_length);
 
     tls_record_free(&record);
     return cert;
