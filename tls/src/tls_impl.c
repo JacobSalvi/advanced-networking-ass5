@@ -413,7 +413,7 @@ void client_hello_init(struct client_hello *hello)
     hello->random.gmt_unix_time = time(NULL);
     RAND_bytes(hello->random.random_bytes, 28);
     // hello->cipher_suite = { 0x00,0x3C };
-    hello->cipher_suite = (0x00 >> 8) & 0x3C;
+    hello->cipher_suite = 0x003C;
     hello->compression_method = 0x00;
 
     hello->sig_algo = 0x0401;
@@ -434,12 +434,28 @@ size_t client_hello_marshall(const struct client_hello *hello,
     //
     // The client does not have to restore a previous session.
 
-    num_to_bytes(hello->version.major, out, 1);
-    num_to_bytes(hello->version.minor, out+1, 1);
-    num_to_bytes(hello->random.gmt_unix_time, out+2, 4);
-    memcpy(out+6, hello->random.random_bytes, 28);
-    num_to_bytes(hello->cipher_suite, out+34, 2);
-    num_to_bytes(hello->compression_method, out+36, 1);
+    // add identifier
+    out[0] = 0x01;
+    // add message length
+    num_to_bytes(len-4, out+1, 3);
+
+    // add tls version supported
+    num_to_bytes(hello->version.major, out+4, 1);
+    num_to_bytes(hello->version.minor, out+5, 1);
+
+    // add client random
+    num_to_bytes(hello->random.gmt_unix_time, out+6, 4);
+    memcpy(out+10, hello->random.random_bytes, 28);
+    // add session id
+    out[38] = 0x00;
+
+    // add cipher suite
+    num_to_bytes(2, out+39, 2);
+    num_to_bytes(hello->cipher_suite, out+41, 2);
+
+    // add compression methods
+    num_to_bytes(1, out+43, 1);
+    num_to_bytes(hello->compression_method, out+44, 1);
 
     num_to_bytes(8, out + 45, 2);
     num_to_bytes(0xd, out + 47, 2);
