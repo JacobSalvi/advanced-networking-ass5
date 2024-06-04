@@ -548,9 +548,13 @@ X509 *server_cert_recv(const struct tls_context *ctx)
     // TODO read the certificate chain and return the first certificate (you may assume that there is only one certificate)
     // Hint: use the d2i_X509 OpenSSL function to deserialize the DER-encoded structure
     X509 *cert = NULL;
-    long cert_length = ((*record.fragment + 3) >> 16) & ((*record.fragment+4)>>8) & ((*record.fragment +5));
-    const uint8_t * first_cert = record.fragment +3;
-    d2i_X509(&cert, &first_cert, cert_length);
+    for(int i =0; i<10; i++){
+        printf("byte at %d is %x\n", i, *(record.fragment+i));
+    }
+    // long cert_length = ((*record.fragment + 3) >> 16) & ((*record.fragment+4)>>8) & ((*record.fragment +5));
+    const uint8_t * first_cert = record.fragment + 10;
+    printf("");
+    d2i_X509(&cert, &first_cert, record.length - 10);
 
     tls_record_free(&record);
     return cert;
@@ -589,7 +593,7 @@ void rsa_premaster_secret_init(struct rsa_premaster_secret *exchange)
 {
     // TODO Generate a RSA premaster secret
     exchange->version.major = tls_1_2.major;
-    exchange->version.major = tls_1_2.minor;
+    exchange->version.minor = tls_1_2.minor;
     RAND_bytes(exchange->random, 46);
 
 }
