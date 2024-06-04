@@ -507,12 +507,21 @@ int server_hello_recv(struct tls_context *ctx, struct server_hello *out)
 
 
     // TODO use the contents of record.fragment to populate the fields of out
-    memcpy(&out->version.major, record.fragment, 1);
-    memcpy(&out->version.minor, record.fragment +1, 1);
-    memcpy(&out->session_id_len, record.fragment+2, 1);
-    memcpy(&out->session_id, record.fragment+3, 32);
-    memcpy(&out->cipher_suite, record.fragment+35, 2);
-    memcpy(&out->compression_method, record.fragment+37, 1);
+    memcpy(&out->version.major, record.fragment+4, 1);
+    memcpy(&out->version.minor, record.fragment +5, 1);
+    uint32_t server_time = 0;
+    for (int i = 0; i < 4; ++i){
+	    server_time = (server_time << 8) + record.fragment[6 + i];
+    }
+    memcpy(&out->random.gmt_unix_time, &server_time, 4);
+    memcpy(&out->random.random_bytes, record.fragment+10, 28);
+    // populate ctx
+    memcpy(ctx->server_random, record.fragment+6, 32);
+    memcpy(&out->session_id_len, record.fragment+38, 1);
+    memcpy(&out->session_id, record.fragment+39, out->session_id_len);
+    uint16_t cipher_suite = (*(record.fragment+39+out->session_id_len) << 8) + *(record.fragment+40+out->session_id_len);
+    memcpy(&out->cipher_suite, &cipher_suite, 2);
+    memcpy(&out->compression_method, record.fragment+41+out->session_id_len, 1);
 
 
     int ret =
