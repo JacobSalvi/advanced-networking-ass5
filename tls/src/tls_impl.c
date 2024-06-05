@@ -20,6 +20,8 @@
 
 
 // READ ME
+// Author: Jacob Salvi
+//
 // I thank Arnaud Fauconnet, who helped me debug my code.
 
 
